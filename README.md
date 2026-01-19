@@ -13,6 +13,14 @@ StackFix is a developer productivity tool that brings AI-powered assistance dire
 - 🔌 **Provider-agnostic** — Works with OpenAI, Nebius, or any compatible API
 - 📝 **Session persistence** — Resume previous conversations
 
+## Documentation
+
+- [Getting Started](./docs/getting-started.md)
+- [Configuration Guide](./docs/configuration.md)
+- [Slash Commands Reference](./docs/slash-commands.md)
+- [Project Context (AGENTS.md)](./docs/agents-md.md)
+- [Changelog](./CHANGELOG.md)
+
 ## Installation
 
 ### npm (recommended)
