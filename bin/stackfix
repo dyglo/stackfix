@@ -1,0 +1,56 @@
+#!/usr/bin/env node
+
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// Get the package root directory
+const packageRoot = path.resolve(__dirname, '..');
+const venvPath = path.join(packageRoot, '.venv');
+
+// Determine Python executable path
+function getPythonPath() {
+  const isWindows = process.platform === 'win32';
+  
+  // Check for venv first
+  if (fs.existsSync(venvPath)) {
+    const venvPython = isWindows
+      ? path.join(venvPath, 'Scripts', 'python.exe')
+      : path.join(venvPath, 'bin', 'python');
+    if (fs.existsSync(venvPython)) {
+      return venvPython;
+    }
+  }
+  
+  // Fall back to system Python
+  return isWindows ? 'python' : 'python3';
+}
+
+// Run stackfix
+const pythonPath = getPythonPath();
+const args = ['-m', 'stackfix', ...process.argv.slice(2)];
+
+const child = spawn(pythonPath, args, {
+  stdio: 'inherit',
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    PYTHONPATH: packageRoot
+  }
+});
+
+child.on('error', (err) => {
+  if (err.code === 'ENOENT') {
+    console.error('Error: Python not found. Please install Python 3.9+');
+    console.error('  Windows: https://www.python.org/downloads/');
+    console.error('  macOS:   brew install python3');
+    console.error('  Linux:   apt install python3 python3-pip');
+    process.exit(1);
+  }
+  console.error('Error:', err.message);
+  process.exit(1);
+});
+
+child.on('exit', (code) => {
+  process.exit(code || 0);
+});

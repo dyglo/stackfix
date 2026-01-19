@@ -1,0 +1,41 @@
+{
+  "name": "stackfix",
+  "version": "0.2.0",
+  "description": "Terminal-first agentic CLI that fixes failing commands using AI",
+  "keywords": [
+    "cli",
+    "ai",
+    "developer-tools",
+    "agent",
+    "llm",
+    "terminal",
+    "debugging"
+  ],
+  "author": "StackFix Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dyglo/stackfix.git"
+  },
+  "bin": {
+    "stackfix": "./bin/stackfix"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "files": [
+    "bin/",
+    "scripts/",
+    "stackfix/",
+    "pyproject.toml",
+    "README.md"
+  ]
+}
