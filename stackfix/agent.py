@@ -6,6 +6,12 @@ import requests
 from typing import Dict, Any, Optional, Tuple
 
 from .util import env_required
+from .config import (
+    get_or_create_device_fingerprint,
+    get_relay_token,
+    is_token_valid,
+    set_relay_token,
+)
 
 SYSTEM_PROMPT = (
     "You are StackFix, an agent that proposes minimal safe patches to fix a failing command. "
@@ -37,6 +43,8 @@ STRICT_DIFF_PROMPT = (
 )
 
 _ENDPOINT_LOGGED = False
+DEFAULT_RELAY_URL = "https://api.stackfix.ai/v1"
+LOCAL_RELAY_URL = "http://localhost:8000/v1"
 
 
 def _log_endpoint_once(url: str) -> None:
@@ -55,6 +63,9 @@ def _redact_secrets(text: str) -> str:
     api_key = os.environ.get("MODEL_API_KEY")
     if api_key:
         text = text.replace(api_key, "[REDACTED]")
+    relay_token = os.environ.get("STACKFIX_RELAY_TOKEN")
+    if relay_token:
+        text = text.replace(relay_token, "[REDACTED]")
     for token_key in ["api_key", "apikey", "token", "authorization", "bearer"]:
         text = text.replace(token_key, f"{token_key[:2]}***")
     return text
@@ -81,8 +92,9 @@ def _model_request_payload(context: Dict[str, Any], system_prompt: str = SYSTEM_
     else:
         user_content = json.dumps(context)
     
+    model_name = os.environ.get("MODEL_NAME") or os.environ.get("STACKFIX_MODEL") or "stackfix-default"
     payload = {
-        "model": env_required("MODEL_NAME"),
+        "model": model_name,
         "temperature": 0.2,
         "max_tokens": max_tokens,
         "messages": [
@@ -110,6 +122,98 @@ def _call_direct(context: Dict[str, Any], system_prompt: str = SYSTEM_PROMPT) ->
         "Content-Type": "application/json",
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    _debug_log(f"HTTP status: {resp.status_code}")
+    resp.raise_for_status()
+    raw_text = resp.text
+    _debug_log(f"Raw response (first 500 chars): { _redact_secrets(raw_text[:500]) }")
+    data = resp.json()
+    content = _extract_content(data)
+    return _parse_agent_response(content)
+
+
+def _relay_base_url() -> str:
+    return os.environ.get("STACKFIX_RELAY_URL", DEFAULT_RELAY_URL).rstrip("/")
+
+
+def _relay_endpoint(path: str) -> str:
+    base = _relay_base_url()
+    if base.endswith("/v1"):
+        return f"{base}{path}"
+    return f"{base}/v1{path}"
+
+
+def _relay_candidates() -> list:
+    env_url = os.environ.get("STACKFIX_RELAY_URL")
+    if env_url:
+        return [env_url]
+    return [DEFAULT_RELAY_URL, LOCAL_RELAY_URL]
+
+
+def _build_relay_url(base: str, path: str) -> str:
+    base = base.rstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}{path}"
+    return f"{base}/v1{path}"
+
+
+def _request_relay_token(cwd: str) -> Tuple[str, int]:
+    device_fingerprint = get_or_create_device_fingerprint(cwd)
+    last_error: Optional[Exception] = None
+    for base in _relay_candidates():
+        url = _build_relay_url(base, "/anon-token")
+        try:
+            resp = requests.post(url, json={"device_fingerprint": device_fingerprint}, timeout=30)
+            _debug_log(f"Relay token HTTP status: {resp.status_code}")
+            resp.raise_for_status()
+            data = resp.json()
+            token = data.get("token")
+            expires_at = data.get("expires_at")
+            if not token or not expires_at:
+                raise RuntimeError("Relay token response missing token or expires_at")
+            set_relay_token(cwd, token, int(expires_at))
+            if os.environ.get("STACKFIX_RELAY_URL") is None:
+                os.environ["STACKFIX_RELAY_URL"] = base
+            return token, int(expires_at)
+        except Exception as exc:
+            last_error = exc
+            _debug_log(f"Relay token failed for {url}: {exc}")
+            continue
+    raise RuntimeError(f"Relay token request failed: {last_error}")
+
+
+def _get_relay_token(cwd: str) -> str:
+    token_info = get_relay_token(cwd)
+    token = token_info.get("token")
+    expires_at = token_info.get("expires_at")
+    if token and is_token_valid(expires_at):
+        return token
+    token, _ = _request_relay_token(cwd)
+    return token
+
+
+def _call_relay(context: Dict[str, Any], system_prompt: str = SYSTEM_PROMPT) -> Dict[str, Any]:
+    cwd = context.get("cwd") or os.getcwd()
+    payload = _model_request_payload(context, system_prompt=system_prompt)
+    token = _get_relay_token(cwd)
+    url = _relay_endpoint("/chat/completions")
+    _log_endpoint_once(url)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    except Exception as exc:
+        if os.environ.get("STACKFIX_RELAY_URL") is None:
+            raise RuntimeError(
+                "Relay unreachable. If running locally, set STACKFIX_RELAY_URL=http://localhost:8000/v1"
+            ) from exc
+        raise
+    if resp.status_code == 401:
+        _debug_log("Relay token expired; refreshing token")
+        token, _ = _request_relay_token(cwd)
+        headers["Authorization"] = f"Bearer {token}"
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
     _debug_log(f"HTTP status: {resp.status_code}")
     resp.raise_for_status()
     raw_text = resp.text
@@ -277,10 +381,19 @@ def _is_valid_hunk_header(line: str) -> bool:
 
 def call_agent(context: Dict[str, Any]) -> Dict[str, Any]:
     endpoint = os.environ.get("STACKFIX_ENDPOINT")
+    provider = os.environ.get("STACKFIX_PROVIDER")
+    use_direct = os.environ.get("STACKFIX_USE_DIRECT") == "1"
     if endpoint:
         result = _call_modal(endpoint, context)
-    else:
+    elif provider == "direct" or use_direct:
         result = _call_direct(context)
+    elif provider == "stackfix":
+        result = _call_relay(context)
+    else:
+        if os.environ.get("MODEL_API_KEY"):
+            result = _call_direct(context)
+        else:
+            result = _call_relay(context)
 
     patch = result.get("patch_unified_diff", "")
     if _is_valid_unified_diff(patch):
@@ -289,8 +402,15 @@ def call_agent(context: Dict[str, Any]) -> Dict[str, Any]:
     _debug_log("Invalid patch format; retrying once with strict diff prompt")
     if endpoint:
         result = _call_modal(endpoint, context, system_prompt=STRICT_DIFF_PROMPT)
-    else:
+    elif provider == "direct" or use_direct:
         result = _call_direct(context, system_prompt=STRICT_DIFF_PROMPT)
+    elif provider == "stackfix":
+        result = _call_relay(context, system_prompt=STRICT_DIFF_PROMPT)
+    else:
+        if os.environ.get("MODEL_API_KEY"):
+            result = _call_direct(context, system_prompt=STRICT_DIFF_PROMPT)
+        else:
+            result = _call_relay(context, system_prompt=STRICT_DIFF_PROMPT)
     patch = result.get("patch_unified_diff", "")
     if _is_valid_unified_diff(patch):
         return result

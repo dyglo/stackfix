@@ -171,22 +171,26 @@ class StackFixTUI(App):
         cwd = os.getcwd()
         if cwd == os.path.expanduser("~"):
             cwd = "~"
-        model = os.environ.get("MODEL_NAME", "gpt-4")
+        model = os.environ.get("MODEL_NAME") or os.environ.get("STACKFIX_MODEL") or "stackfix-default"
         version = "v0.2.0"
-        
-        # Simpler, cleaner splash
-        return (
-            f"\n [bold]StackFix[/bold] [dim]{version}[/dim]\n"
-            f" [dim]model:[/dim] {model}\n"
-            f" [dim]cwd:[/dim]   {cwd}\n"
-        )
+
+        lines = [
+            f"> StackFix ({version})",
+            f"model: {model}",
+            f"directory: {cwd}",
+        ]
+        width = max(len(line) for line in lines) + 2
+        top = "+" + "-" * width + "+"
+        body = "\n".join(f"| {line.ljust(width - 1)}|" for line in lines)
+        bottom = "+" + "-" * width + "+"
+        return f"\n{top}\n{body}\n{bottom}\n"
 
     def _render_tip(self) -> str:
-        return "[bold]Tip:[/bold] Use [bold]/skills[/bold] to list available skills or ask StackFix to use one."
+        return "[bold]Tip:[/bold] Use [bold]/help[/bold] for commands or [bold]/skills[/bold] to list skills."
 
     def _render_status(self) -> str:
         phase_style = "[bold cyan]" if self._current_phase != "Ready" else "[dim]"
-        return f" {phase_style}• {self._current_phase}[/]  ·  [dim]100% context left[/dim]  ·  [dim]? for shortcuts[/dim]"
+        return f" {phase_style}* {self._current_phase}[/]  -  [dim]100% context left[/dim]  -  [dim]? for shortcuts[/dim]"
 
     def action_clear(self) -> None:
         if self._log:
@@ -200,6 +204,12 @@ class StackFixTUI(App):
         self._current_phase = name
         if hasattr(self, "_status_bar") and self._status_bar:
             self._status_bar.update(self._render_status())
+
+    def _agent_error_hint(self, exc: Exception) -> Optional[str]:
+        message = str(exc)
+        if "Relay token request failed" in message or "Relay unreachable" in message:
+            return "Hint: set STACKFIX_RELAY_URL=http://localhost:8000/v1 if your relay is local."
+        return None
 
     def _set_plan(self, steps: List[str]) -> None:
         self._last_plan = steps
@@ -226,10 +236,14 @@ class StackFixTUI(App):
 
     def _show_status(self) -> None:
         cwd = os.getcwd()
-        model = os.environ.get("MODEL_NAME", "unset")
+        model = os.environ.get("MODEL_NAME") or os.environ.get("STACKFIX_MODEL") or "unset"
+        provider = os.environ.get("STACKFIX_PROVIDER", "auto")
+        relay_url = os.environ.get("STACKFIX_RELAY_URL", "default")
         endpoint = os.environ.get("STACKFIX_ENDPOINT", "direct")
         self._log_line(f"cwd: {cwd}")
         self._log_line(f"model: {model}")
+        self._log_line(f"provider: {provider}")
+        self._log_line(f"relay_url: {relay_url}")
         self._log_line(f"endpoint: {endpoint}")
         self._log_line(f"approvals: {self._approvals_mode}")
         self._log_line(f"session: {self._session_id}")
@@ -467,6 +481,9 @@ class StackFixTUI(App):
             agent_result = call_agent(context)
         except Exception as exc:
             self.call_from_thread(self._log_line, f"Agent call failed: {exc}")
+            hint = self._agent_error_hint(exc)
+            if hint:
+                self.call_from_thread(self._log_line, f"[dim]{hint}[/dim]")
             return
 
         warning = agent_result.get("_warning")
@@ -569,6 +586,9 @@ class StackFixTUI(App):
             agent_result = call_agent(context)
         except Exception as exc:
             self.call_from_thread(self._log_line, f"Agent call failed: {exc}")
+            hint = self._agent_error_hint(exc)
+            if hint:
+                self.call_from_thread(self._log_line, f"[dim]{hint}[/dim]")
             return
         warning = agent_result.get("_warning")
         if warning:

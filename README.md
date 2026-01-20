@@ -19,6 +19,7 @@ StackFix is a developer productivity tool that brings AI-powered assistance dire
 - [Configuration Guide](./docs/configuration.md)
 - [Slash Commands Reference](./docs/slash-commands.md)
 - [Project Context (AGENTS.md)](./docs/agents-md.md)
+- [Relay Setup](./docs/relay.md)
 - [Changelog](./CHANGELOG.md)
 
 ## Installation
@@ -58,20 +59,27 @@ stackfix -- pytest -q
 
 ## Configuration
 
-Set environment variables for your LLM provider:
+StackFix defaults to the hosted relay (no API key required). For direct providers, set env vars below.
 
 ```bash
-# OpenAI
+# StackFix Relay (default)
+export STACKFIX_PROVIDER="stackfix"
+export STACKFIX_RELAY_URL="https://api.stackfix.ai/v1"
+
+# OpenAI (direct)
+export STACKFIX_PROVIDER="direct"
 export MODEL_BASE_URL="https://api.openai.com/v1"
 export MODEL_API_KEY="sk-..."
 export MODEL_NAME="gpt-4"
 
-# Nebius
+# Nebius (direct)
+export STACKFIX_PROVIDER="direct"
 export MODEL_BASE_URL="https://api.tokenfactory.nebius.com/v1"
 export MODEL_API_KEY="..."
 export MODEL_NAME="openai/gpt-oss-120b"
 
 # Local (Ollama)
+export STACKFIX_PROVIDER="direct"
 export MODEL_BASE_URL="http://localhost:11434/v1"
 export MODEL_NAME="codellama:13b"
 ```

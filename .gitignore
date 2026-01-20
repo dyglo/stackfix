@@ -6,6 +6,8 @@
 .env.production.local
 .env.sample
 !.env.example
+.env.relay
+relay/.env.relay
 
 # Python
 __pycache__/

@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+  relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      STACKFIX_ENV: "prod"
+      STACKFIX_RELAY_SECRET: "change-me"
+      STACKFIX_REDIS_URL: "redis://redis:6379/0"
+      STACKFIX_UPSTREAM_BASE_URL: "${STACKFIX_UPSTREAM_BASE_URL}"
+      STACKFIX_UPSTREAM_API_KEY: "${STACKFIX_UPSTREAM_API_KEY}"
+      STACKFIX_UPSTREAM_MODEL: "${STACKFIX_UPSTREAM_MODEL}"
+    depends_on:
+      - redis
+volumes:
+  redis-data:

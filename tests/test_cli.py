@@ -1,5 +1,6 @@
 """Tests for StackFix CLI."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,20 +31,21 @@ def test_cli_last_no_history(temp_cwd):
     assert "No history found" in result.stdout
 
 
-def test_cli_prompt_mode_without_model(temp_cwd, monkeypatch):
-    """Test prompt mode fails gracefully without model config."""
-    # Remove any model env vars
-    monkeypatch.delenv("MODEL_BASE_URL", raising=False)
-    monkeypatch.delenv("MODEL_API_KEY", raising=False)
-    monkeypatch.delenv("MODEL_NAME", raising=False)
-    
+def test_cli_prompt_mode_without_model(temp_cwd):
+    """Test prompt mode fails when direct provider is forced without config."""
+    env = os.environ.copy()
+    env.pop("MODEL_BASE_URL", None)
+    env.pop("MODEL_API_KEY", None)
+    env.pop("MODEL_NAME", None)
+    env["STACKFIX_PROVIDER"] = "direct"
+
     result = subprocess.run(
         [sys.executable, "-m", "stackfix", "--prompt", "hello"],
         capture_output=True,
         text=True,
         cwd=temp_cwd,
+        env=env,
     )
-    # Should fail because model is not configured
     assert result.returncode != 0
     assert "MODEL_BASE_URL" in result.stderr or "Agent call failed" in result.stderr
 
